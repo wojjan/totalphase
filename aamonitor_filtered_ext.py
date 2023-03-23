@@ -44,10 +44,10 @@ TIMEFORMAT  = "%Y-%m-%d %H:%M:%S"
 #==========================================================================
 # FUNCTIONS
 #==========================================================================
-def dump (handle, filter_addr, timeout):
+def dump (handle, filter_addr, filter_reg, timeout):
     # Wait for data on the bus
     print("Waiting %d ms for first transaction..." % timeout)
-    print("  Filtering on 0x%03x" % filter_addr)
+    print("  Filtering on device address 0x%03x and register 0x%03x" % (filter_addr, filter_reg))
     result = aa_async_poll(handle, timeout)
     if (result == AA_ASYNC_NO_DATA):
         print("  no data pending.")
@@ -66,6 +66,12 @@ def dump (handle, filter_addr, timeout):
         # the timeout should never be exercised.
         (status, data) = aa_i2c_monitor_read(handle, BUFFER_SIZE)
 
+        '''
+        examples of data received:
+        array('H', [65280, 224, 150, 65280, 225, 0, 128, 309, 65281])
+        2023-03-23 15:28:50 : [S] <70:w> 96
+        2023-03-23 15:28:50 : [S] <70:r> 00 80 35* [P]        '''
+        
         if (status < 0):
             print("error: %s" % aa_status_string(status))
             return
@@ -108,6 +114,7 @@ def dump (handle, filter_addr, timeout):
 
                     # Test to see if 7-bit address matches
                     if ((data[i] & 0xff) >> 1 == filter_addr):
+                        #print(data[1])
                         # If the address matches, the set display to 1
                         display = 1
                         # Write out the start condition
@@ -168,17 +175,24 @@ def dump (handle, filter_addr, timeout):
 #==========================================================================
 # MAIN PROGRAM
 #==========================================================================
-if (len(sys.argv) < 4):
-    print("usage: aamonitor PORT ADDR TIMEOUT")
+if (len(sys.argv) < 5):
+    print("usage: aamonitor PORT ADDR REG TIMEOUT")
     print("  where:")
     print("    PORT    is the Aardvark adapter port number")
     print("    ADDR    is the slave address as an integer")
+    print("    REG     is the slave register as an integer")
     print("    TIMEOUT is the timeout interval in ms")
     sys.exit()
 
 port        = int(sys.argv[1])
 filter_addr = int(sys.argv[2], 0)
-timeout     = int(sys.argv[3])
+filter_reg  = int(sys.argv[3], 0)
+timeout     = int(sys.argv[4])
+
+if filter_reg >= 256:
+    print("filter_reg " + str(filtered_reg) + " >= 256")
+    sys.exit(1)
+
 
 # Open the device
 handle = aa_open(port)
@@ -209,7 +223,7 @@ if (result < 0):
 print("Enabled I2C monitor.")
 
 # Watch the I2C port
-dump(handle, filter_addr, timeout)
+dump(handle, filter_addr, filter_reg, timeout)
 
 # Disable the slave and close the device
 aa_i2c_monitor_disable(handle)
