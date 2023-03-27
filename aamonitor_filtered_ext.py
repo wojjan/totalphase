@@ -29,7 +29,7 @@
 # IMPORTS
 #==========================================================================
 from __future__ import division, with_statement, print_function
-import sys, time
+import sys, time, datetime
 
 from aardvark_py import *
 
@@ -67,120 +67,123 @@ def dump (handle, filter_addr, filter_reg, timeout):
     starts = 0
     address_matched = 0
     
-    # Loop until aa_async_poll times out
-    while 1:
-        # Read the next monitor transaction.
-        # This function has an internal timeout (see datasheet), though
-        # since we have already checked for data using aa_async_poll,
-        # the timeout should never be exercised.
-        (status, data) = aa_i2c_monitor_read(handle, BUFFER_SIZE)
-
-        '''
-        examples of data received:
-        array('H', [65280, 224, 150, 65280, 225, 0, 128, 309, 65281])
-        gives: AA_I2C_MONITOR_CMD_START, 0xe0 -> 0x70+write, 150=0x96, repeated AA_I2C_MONITOR_CMD_START, 225 -> 0x70+read, 0x00, 0x80, 309=0x135 -> 0x35+NACK
-        2023-03-23 15:28:50 : [S] <70:w> 96
-        2023-03-23 15:28:50 : [S] <70:r> 00 80 35* [P]        '''
-        #print(data)
-        #print_data(data)
+    with open("filtered_addr" + hex(filter_addr) + "_reg" + hex(filter_reg) + "__" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"), "w") as fout:
         
-        if (status < 0):
-            print("error: %s" % aa_status_string(status))
-            return
+        # Loop until aa_async_poll times out
+        while 1:
+            # Read the next monitor transaction.
+            # This function has an internal timeout (see datasheet), though
+            # since we have already checked for data using aa_async_poll,
+            # the timeout should never be exercised.
+            (status, data) = aa_i2c_monitor_read(handle, BUFFER_SIZE)
 
-        # The display flag indicates if the filtered address has been matched
-        # and the data should be displayed.
-        display        = 0
+            '''
+            examples of data received:
+            array('H', [65280, 224, 150, 65280, 225, 0, 128, 309, 65281])
+            gives: AA_I2C_MONITOR_CMD_START, 0xe0 -> 0x70+write, 150=0x96, repeated AA_I2C_MONITOR_CMD_START, 225 -> 0x70+read, 0x00, 0x80, 309=0x135 -> 0x35+NACK
+            2023-03-23 15:28:50 : [S] <70:w> 96
+            2023-03-23 15:28:50 : [S] <70:r> 00 80 35* [P]        '''
+            #print(data)
+            #print_data(data)
+            
+            if (status < 0):
+                print("error: %s" % aa_status_string(status))
+                return
 
-        # The display_buffer is used to hold the start condition and slave address because they
-        # are sent before the match conditions is evaluated, so the output needs to be
-        # cached to display later.
-        display_buffer = ""
+            # The display flag indicates if the filtered address has been matched
+            # and the data should be displayed.
+            display        = 0
 
-        for i in range(len(data)):
-            #print("<" + str(data[i]) + ">")
-            if (data[i] == AA_I2C_MONITOR_CMD_START):
-                # Generate a timestamp.  This time stamp does not accurately
-                # reflect the actual time that the transaction occurred, but
-                # is generated to give the user a relative time for the
-                # transaction.
-                if i == 0:
-                    fmtstamp = time.strftime(TIMEFORMAT, time.localtime(time.time()))
+            # The display_buffer is used to hold the start condition and slave address because they
+            # are sent before the match conditions is evaluated, so the output needs to be
+            # cached to display later.
+            display_buffer = ""
 
-                    # Cache the start condition
-                    display_buffer = "\n%s : [S] " % fmtstamp
-                else:
-                    display_buffer = display_buffer + "[S]"
-                    #print(display_buffer)
+            for i in range(len(data)):
+                #print("<" + str(data[i]) + ">")
+                if (data[i] == AA_I2C_MONITOR_CMD_START):
+                    # Generate a timestamp.  This time stamp does not accurately
+                    # reflect the actual time that the transaction occurred, but
+                    # is generated to give the user a relative time for the
+                    # transaction.
+                    if i == 0:
+                        fmtstamp = time.strftime(TIMEFORMAT, time.localtime(time.time()))
 
-            elif (data[i] == AA_I2C_MONITOR_CMD_STOP):
-                #if display:
-                    #sys.stdout.write("[P]\n")
-                # After a stop condition, reset the display flag for
-                # next message
-                if display == 1:
+                        # Cache the start condition
+                        display_buffer = "%s : [S]" % fmtstamp
+                    else:
+                        display_buffer = display_buffer + "[S]"
+                        #print(display_buffer)
+
+                elif (data[i] == AA_I2C_MONITOR_CMD_STOP):
+                    #if display:
+                        #sys.stdout.write("[P]\n")
+                    # After a stop condition, reset the display flag for
+                    # next message
+                    if display == 1:
+                        display = 0
+                        display_buffer = display_buffer + "[P]\n"
+                        sys.stdout.write(display_buffer)
+                        fout.write(display_buffer)
                     display = 0
-                    display_buffer = display_buffer + "[P]\n"
-                    sys.stdout.write(display_buffer)
-                display = 0
 
-            # neither START nor STOP condition
-            else:
-                # nack/ack info is included in each data
-                nack = (data[i] & AA_I2C_MONITOR_NACK)
-                if nack:  nack_str = "*"
-                else:     nack_str = ""
+                # neither START nor STOP condition
+                else:
+                    # nack/ack info is included in each data
+                    nack = (data[i] & AA_I2C_MONITOR_NACK)
+                    if nack:  nack_str = "*"
+                    else:     nack_str = ""
 
-                # 7-bit addresses
-                if last_data0 == AA_I2C_MONITOR_CMD_START: # and nack):
-                    #((data[i] & 0xf8) != 0xf0 or nack)):
+                    # 7-bit addresses
+                    if last_data0 == AA_I2C_MONITOR_CMD_START: # and nack):
+                        #((data[i] & 0xf8) != 0xf0 or nack)):
 
-                    #display_buffer = display_buffer + " <%02x:%s>%s " % data[i]
-                    # Test to see if 7-bit address matches
-                    if ((data[i] & 0xff) >> 1 == filter_addr):
-                        address_matched = 1
-                        #print(data[1])
-                        
-                        # Now process regularly
+                        #display_buffer = display_buffer + " <%02x:%s>%s " % data[i]
+                        # Test to see if 7-bit address matches
+                        if ((data[i] & 0xff) >> 1 == filter_addr):
+                            address_matched = 1
+                            #print(data[1])
+                            
+                            # Now process regularly
+                            if (data[i] & 0x01): dir_str = "r"
+                            else:                dir_str = "w"
+                            display_buffer = display_buffer + " <%02x:%s>%s " % ((data[i] & 0xff) >> 1, dir_str, nack_str)
+                            '''
+                            sys.stdout.write("<%02x:%s>%s " %
+                                ((data[i] & 0xff) >> 1,
+                                dir_str,
+                                nack_str
+                                ))
+                            '''
+
+                    # Not slave address byte
+                    #elif (last_data0 != AA_I2C_MONITOR_CMD_START):
+                    else:
+                        #print("|" + str(data[i]) + "|")
                         if (data[i] & 0x01): dir_str = "r"
                         else:                dir_str = "w"
-                        display_buffer = display_buffer + " <%02x:%s>%s " % ((data[i] & 0xff) >> 1, dir_str, nack_str)
-                        '''
-                        sys.stdout.write("<%02x:%s>%s " %
-                            ((data[i] & 0xff) >> 1,
-                            dir_str,
-                            nack_str
-                            ))
-                        '''
+                        #display_buffer = display_buffer + "[[%02x:%s]]%s " % ((last_data0 & 0xff) >> 1, dir_str, nack_str)
 
-                # Not slave address byte
-                #elif (last_data0 != AA_I2C_MONITOR_CMD_START):
-                else:
-                    #print("|" + str(data[i]) + "|")
-                    if (data[i] & 0x01): dir_str = "r"
-                    else:                dir_str = "w"
-                    #display_buffer = display_buffer + "[[%02x:%s]]%s " % ((last_data0 & 0xff) >> 1, dir_str, nack_str)
+                        if (last_data1 == AA_I2C_MONITOR_CMD_START) and ((last_data0 & 0xff) >> 1 == filter_addr):  # address_matched can be used here
+                            if data[i] == filter_reg:
+                                display = 1
+                                #sys.stdout.write(display_buffer)
+                                # And reset the buffer
+                                #display_buffer = ""
 
-                    if (last_data1 == AA_I2C_MONITOR_CMD_START) and ((last_data0 & 0xff) >> 1 == filter_addr):  # address_matched can be used here
-                        if data[i] == filter_reg:
-                            display = 1
-                            #sys.stdout.write(display_buffer)
-                            # And reset the buffer
-                            #display_buffer = ""
+                        display_buffer = display_buffer + "%02x%s " % (data[i] & 0xff, nack_str)
 
-                    display_buffer = display_buffer + "%02x%s " % (data[i] & 0xff, nack_str)
+                last_data1 = last_data0
+                last_data0 = data[i]
+                sys.stdout.flush()
 
-            last_data1 = last_data0
-            last_data0 = data[i]
-            sys.stdout.flush()
+            # print "\nWaiting %d ms for subsequent transaction..." % INTERVAL_TIMEOUT
 
-        # print "\nWaiting %d ms for subsequent transaction..." % INTERVAL_TIMEOUT
-
-        # Use aa_async_poll to wait for the next transaction
-        result = aa_async_poll(handle, timeout)
-        if (result == AA_ASYNC_NO_DATA):
-            print("  No more data pending.")
-            break
+            # Use aa_async_poll to wait for the next transaction
+            result = aa_async_poll(handle, timeout)
+            if (result == AA_ASYNC_NO_DATA):
+                print("  No more data pending.")
+                break
 
 
 #==========================================================================
